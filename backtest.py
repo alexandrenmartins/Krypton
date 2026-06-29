@@ -4,6 +4,12 @@
 # Baixa dados históricos primeiro pela Binance Global, depois Binance US e,
 # se necessário, usa Yahoo Finance como fallback. A estratégia do bot não foi alterada.
 #
+# ✅ FIX v2: Pré-aquecimento de 300 candles antes do período solicitado
+#    Isso garante que RSI(14), MACD(12,26,9) e Supertrend(7) estejam
+#    totalmente estabilizados quando o backtest começar a contabilizar trades.
+#    Sem isso, períodos curtos (ex: 1 ano) retornam 0 trades por falta de
+#    histórico nos indicadores.
+#
 # Uso:
 #   python backtest.py --symbol SOLUSDT --start 2022-01-01 --end 2026-06-01
 #   python backtest.py --symbol BTCUSDT --start 2024-01-01
@@ -11,7 +17,7 @@
 
 import argparse
 import time
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 
 import numpy as np
 import pandas as pd
@@ -35,7 +41,7 @@ from indicators import compute_atr, compute_signals
 
 
 BINANCE_GLOBAL_URL = "https://api.binance.com/api/v3/klines"
-BINANCE_US_URL = "https://api.binance.us/api/v3/klines"
+BINANCE_US_URL     = "https://api.binance.us/api/v3/klines"
 
 # Binance US usa pares USD em alguns ativos. Binance Global usa USDT.
 BINANCE_US_SYMBOL_MAP = {
@@ -51,6 +57,10 @@ YAHOO_SYMBOL_MAP = {
     "ETHUSDT": "ETH-USD",
     "BNBUSDT": "BNB-USD",
 }
+
+# Número de candles extras buscados ANTES do período para aquecer os indicadores.
+# RSI precisa de ~14, MACD de ~35, Supertrend de ~30 → 300 dias é margem segura.
+WARMUP_DAYS = 300
 
 
 def _date_to_ms(value: str) -> int:
@@ -77,23 +87,25 @@ def _klines_to_df(klines: list) -> pd.DataFrame:
     return df[["open", "high", "low", "close", "volume"]]
 
 
-def get_ohlcv_binance(symbol: str, start_str: str, end_str: str | None, base_url: str, symbol_map: dict | None = None) -> pd.DataFrame:
+def get_ohlcv_binance(symbol: str, start_str: str, end_str: str | None,
+                       base_url: str, symbol_map: dict | None = None) -> pd.DataFrame:
     """
     Baixa OHLCV pela API pública da Binance/Binance US em lotes de 1000 candles.
     """
-    symbol_api = symbol_map.get(symbol.upper(), symbol.upper()) if symbol_map else symbol.upper()
+    symbol_api = (symbol_map.get(symbol.upper(), symbol.upper())
+                  if symbol_map else symbol.upper())
     start_ts = _date_to_ms(start_str)
-    end_ts = _date_to_ms(end_str) if end_str else None
+    end_ts   = _date_to_ms(end_str) if end_str else None
 
     all_klines = []
     current_ts = start_ts
 
     while True:
         params = {
-            "symbol": symbol_api,
-            "interval": "1d",
+            "symbol":    symbol_api,
+            "interval":  "1d",
             "startTime": current_ts,
-            "limit": 1000,
+            "limit":     1000,
         }
         if end_ts:
             params["endTime"] = end_ts
@@ -124,9 +136,10 @@ def get_ohlcv_binance(symbol: str, start_str: str, end_str: str | None, base_url
     return _klines_to_df(all_klines)
 
 
-def get_ohlcv_yahoo(symbol: str, start_str: str, end_str: str | None = None) -> pd.DataFrame:
+def get_ohlcv_yahoo(symbol: str, start_str: str,
+                     end_str: str | None = None) -> pd.DataFrame:
     """
-    Fallback via Yahoo Finance para períodos em que Binance US não possui candles.
+    Fallback via Yahoo Finance para períodos em que Binance não estiver disponível.
     """
     yf_symbol = YAHOO_SYMBOL_MAP.get(symbol.upper())
     if not yf_symbol:
@@ -151,15 +164,10 @@ def get_ohlcv_yahoo(symbol: str, start_str: str, end_str: str | None = None) -> 
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
 
-    df = df.rename(
-        columns={
-            "Open": "open",
-            "High": "high",
-            "Low": "low",
-            "Close": "close",
-            "Volume": "volume",
-        }
-    )
+    df = df.rename(columns={
+        "Open": "open", "High": "high", "Low": "low",
+        "Close": "close", "Volume": "volume",
+    })
 
     required_cols = ["open", "high", "low", "close", "volume"]
     if not all(col in df.columns for col in required_cols):
@@ -169,24 +177,27 @@ def get_ohlcv_yahoo(symbol: str, start_str: str, end_str: str | None = None) -> 
     return df[required_cols].dropna()
 
 
-def get_ohlcv(symbol: str, start_str: str, end_str: str | None = None) -> tuple[pd.DataFrame, str]:
+def get_ohlcv(symbol: str, start_str: str,
+               end_str: str | None = None) -> tuple[pd.DataFrame, str]:
     """
-    Busca dados em múltiplas fontes sem alterar a estratégia do backtest.
+    Busca dados em múltiplas fontes. Retorna a fonte com mais candles.
     """
     sources = [
-        ("Binance Global", lambda: get_ohlcv_binance(symbol, start_str, end_str, BINANCE_GLOBAL_URL)),
-        ("Binance US", lambda: get_ohlcv_binance(symbol, start_str, end_str, BINANCE_US_URL, BINANCE_US_SYMBOL_MAP)),
-        ("Yahoo Finance", lambda: get_ohlcv_yahoo(symbol, start_str, end_str)),
+        ("Binance Global", lambda: get_ohlcv_binance(
+            symbol, start_str, end_str, BINANCE_GLOBAL_URL)),
+        ("Binance US",     lambda: get_ohlcv_binance(
+            symbol, start_str, end_str, BINANCE_US_URL, BINANCE_US_SYMBOL_MAP)),
+        ("Yahoo Finance",  lambda: get_ohlcv_yahoo(symbol, start_str, end_str)),
     ]
 
-    best_df = pd.DataFrame()
+    best_df     = pd.DataFrame()
     best_source = "nenhuma fonte"
 
     for source_name, loader in sources:
         print(f"\n  Tentando {source_name}...", end=" ", flush=True)
         df = loader()
         if len(df) > len(best_df):
-            best_df = df
+            best_df     = df
             best_source = source_name
 
         if len(df) >= 50:
@@ -202,7 +213,12 @@ def run_backtest(symbol: str, start: str, end: str | None = None) -> dict:
     """
     Executa backtest da estratégia Supertrend + RSI + MACD.
 
-    Simula execução diária com:
+    ✅ Pré-aquecimento: busca WARMUP_DAYS candles extras antes de `start`
+       para garantir que todos os indicadores estejam estabilizados.
+       As métricas (trades, retorno, etc.) só são contabilizadas a partir
+       de `start`, não do período de aquecimento.
+
+    Parâmetros de simulação:
       - Position sizing ATR-based (1% de risco por trade)
       - Stop Loss: 2× ATR(14)
       - Take Profit: 3× ATR(14)  |  R:R = 1,5:1
@@ -213,21 +229,29 @@ def run_backtest(symbol: str, start: str, end: str | None = None) -> dict:
     print(f"KRYPTON BACKTEST: {symbol}")
     print(f"Período: {start} → {end or 'hoje'}")
     print(f"{'='*60}")
-    print("Baixando dados históricos...", flush=True)
 
-    df, data_source = get_ohlcv(symbol, start, end)
+    # ── Calcular data de início com pré-aquecimento ──────────────────────────
+    start_dt   = datetime.strptime(start, "%Y-%m-%d")
+    warmup_dt  = start_dt - timedelta(days=WARMUP_DAYS)
+    warmup_str = warmup_dt.strftime("%Y-%m-%d")
 
-    if len(df) < 50:
-        print(f"\n❌ Dados insuficientes ({len(df)} candles). Verifique o símbolo e as datas.")
+    print(f"Baixando dados históricos (incl. {WARMUP_DAYS}d de aquecimento)...", flush=True)
+
+    df_full, data_source = get_ohlcv(symbol, warmup_str, end)
+
+    if len(df_full) < 50:
+        print(f"\n❌ Dados insuficientes ({len(df_full)} candles). "
+              f"Verifique o símbolo e as datas.")
         return {}
 
     print(f"\nFonte usada: {data_source}")
-    print(f"✓ {len(df)} candles carregados.")
-    print(f"  {df.index[0].date()} → {df.index[-1].date()}")
+    print(f"✓ {len(df_full)} candles carregados (aquecimento incluso).")
+    print(f"  {df_full.index[0].date()} → {df_full.index[-1].date()}")
 
-    # ─── Geração de Sinais ────────────────────────────────────────────────────
-    signals = compute_signals(
-        df,
+    # ── Gerar sinais sobre o dataset COMPLETO (inclui aquecimento) ───────────
+    # Isso garante que RSI, MACD e Supertrend estejam estabilizados em `start`.
+    signals_full = compute_signals(
+        df_full,
         st_period  = SUPERTREND_PERIOD,
         st_mult    = SUPERTREND_MULTIPLIER,
         rsi_period = RSI_PERIOD,
@@ -238,7 +262,20 @@ def run_backtest(symbol: str, start: str, end: str | None = None) -> dict:
         macd_sig   = MACD_SIGNAL,
     )
 
-    # ─── Simulação de Trading ─────────────────────────────────────────────────
+    # ── Fatiar apenas o período solicitado para contabilizar métricas ─────────
+    # Os trades e o equity curve começam em `start`, não no período de warmup.
+    start_ts = pd.Timestamp(start)
+    df       = df_full.loc[start_ts:].copy()
+    signals  = signals_full.loc[start_ts:].copy()
+
+    print(f"\nPeríodo de backtest (sem aquecimento): "
+          f"{df.index[0].date()} → {df.index[-1].date()} ({len(df)} candles)")
+
+    if len(df) < 10:
+        print("❌ Período de backtest muito curto após remover aquecimento.")
+        return {}
+
+    # ── Simulação de Trading ──────────────────────────────────────────────────
     capital  = 10_000.0
     peak     = capital
     equity   = [capital]
@@ -254,16 +291,16 @@ def run_backtest(symbol: str, start: str, end: str | None = None) -> dict:
 
         # Gerenciar posição aberta
         if pos != 0:
-            sl      = entry - 2 * atr_v if pos ==  1 else entry + 2 * atr_v
-            tp      = entry + 3 * atr_v if pos ==  1 else entry - 3 * atr_v
-            hit_sl  = (pos ==  1 and price <= sl) or (pos == -1 and price >= sl)
-            hit_tp  = (pos ==  1 and price >= tp) or (pos == -1 and price <= tp)
+            sl     = entry - 2 * atr_v if pos ==  1 else entry + 2 * atr_v
+            tp     = entry + 3 * atr_v if pos ==  1 else entry - 3 * atr_v
+            hit_sl = (pos ==  1 and price <= sl) or (pos == -1 and price >= sl)
+            hit_tp = (pos ==  1 and price >= tp) or (pos == -1 and price <= tp)
             exit_sg = (pos != sig and sig != 0)
 
             if hit_sl or hit_tp or exit_sg:
-                fee  = pos_size * price * FEE_RATE
-                pnl  = (pos_size * (price - entry) if pos == 1
-                        else pos_size * (entry - price)) - fee
+                fee    = pos_size * price * FEE_RATE
+                pnl    = (pos_size * (price - entry) if pos == 1
+                          else pos_size * (entry - price)) - fee
                 capital += pnl
                 trades.append({
                     "pnl"        : pnl,
@@ -286,7 +323,7 @@ def run_backtest(symbol: str, start: str, end: str | None = None) -> dict:
 
         equity.append(capital)
 
-    # ─── Métricas ─────────────────────────────────────────────────────────────
+    # ── Métricas ──────────────────────────────────────────────────────────────
     eq     = pd.Series(equity, index=df.index[: len(equity)])
     ret    = (capital - 10_000) / 10_000
     rets   = eq.pct_change().dropna()
@@ -305,7 +342,7 @@ def run_backtest(symbol: str, start: str, end: str | None = None) -> dict:
     for t in trades:
         exit_reasons[t["exit_reason"]] = exit_reasons.get(t["exit_reason"], 0) + 1
 
-    # ─── Impressão dos Resultados ─────────────────────────────────────────────
+    # ── Impressão dos Resultados ──────────────────────────────────────────────
     print(f"\n{'─'*60}")
     print(f"{'MÉTRICA':<28} {'BOT':>10} {'BUY & HOLD':>12}")
     print(f"{'─'*60}")
@@ -339,7 +376,7 @@ def run_backtest(symbol: str, start: str, end: str | None = None) -> dict:
     }
 
 
-# ─── Entry Point ──────────────────────────────────────────────────────────────
+# ── Entry Point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Krypton TradeBot — Backtest Standalone",
