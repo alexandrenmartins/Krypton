@@ -38,6 +38,7 @@ logger = logging.getLogger("Krypton.Binance")
 # Constantes de retry
 MAX_RETRIES  = 3
 RETRY_DELAY  = 5  # segundos entre tentativas
+MIN_NOTIONAL_ROUND_UP_THRESHOLD = 8.00  # USDT: compra entre 8 e o mínimo da Binance sobe para o mínimo
 
 
 class BinanceInterface:
@@ -138,18 +139,29 @@ class BinanceInterface:
 
     # ─── Utilitários de Arredondamento ────────────────────────────────────────
 
+    def _step_precision(self, step: float) -> int:
+        """Retorna a precisão decimal necessária para um step_size/tick_size."""
+        return len(str(step).rstrip("0").split(".")[-1])
+
     def _round_step(self, qty: float, step: float) -> float:
         """Arredonda quantidade para o step_size do par (floor)."""
         if step == 0:
             return qty
-        precision = len(str(step).rstrip("0").split(".")[-1])
+        precision = self._step_precision(step)
         return round(math.floor(qty / step) * step, precision)
+
+    def _ceil_step(self, qty: float, step: float) -> float:
+        """Arredonda quantidade para cima respeitando o step_size do par."""
+        if step == 0:
+            return qty
+        precision = self._step_precision(step)
+        return round(math.ceil(qty / step) * step, precision)
 
     def _round_tick(self, price: float, tick: float) -> float:
         """Arredonda preço para o tick_size do par."""
         if tick == 0:
             return price
-        precision = len(str(tick).rstrip("0").split(".")[-1])
+        precision = self._step_precision(tick)
         return round(round(price / tick) * tick, precision)
 
     # ─── Execução de Ordens ───────────────────────────────────────────────────
@@ -167,7 +179,8 @@ class BinanceInterface:
 
         Regras de segurança:
           - Rejeita se desvio do mid-price > SLIPPAGE_LIMIT_PCT (0,5%)
-          - Rejeita se notional < min_notional
+          - Para BUY entre $8 e o mínimo da Binance, ajusta para o mínimo
+          - Rejeita se notional < min_notional após o ajuste
           - Arredonda quantity ao step_size e price ao tick_size
 
         Parâmetros
@@ -188,34 +201,49 @@ class BinanceInterface:
             )
             return None
 
+        side_upper     = side.upper()
         qty_rounded   = self._round_step(quantity, symbol_info["step_size"])
         price_rounded = self._round_tick(price, symbol_info["tick_size"])
         notional      = qty_rounded * price_rounded
+        min_notional  = symbol_info["min_notional"]
 
-        if notional < symbol_info["min_notional"]:
+        if (
+            side_upper == "BUY"
+            and MIN_NOTIONAL_ROUND_UP_THRESHOLD <= notional < min_notional
+        ):
+            target_qty  = min_notional / price_rounded
+            qty_rounded = self._ceil_step(target_qty, symbol_info["step_size"])
+            notional    = qty_rounded * price_rounded
+            logger.info(
+                f"Ajuste de compra mínima | {symbol} | "
+                f"notional calculado abaixo do mínimo e >= ${MIN_NOTIONAL_ROUND_UP_THRESHOLD:.2f}; "
+                f"nova qty: {qty_rounded} | novo notional: ${notional:.2f}"
+            )
+
+        if notional < min_notional:
             logger.warning(
-                f"Ordem {side} rejeitada — notional ${notional:.2f} "
-                f"< mínimo ${symbol_info['min_notional']:.2f} | {symbol}"
+                f"Ordem {side_upper} rejeitada — notional ${notional:.2f} "
+                f"< mínimo ${min_notional:.2f} | {symbol}"
             )
             return None
 
         try:
             order = self.client.create_order(
                 symbol      = symbol,
-                side        = side,
+                side        = side_upper,
                 type        = Client.ORDER_TYPE_LIMIT,
                 timeInForce = Client.TIME_IN_FORCE_GTC,
                 quantity    = qty_rounded,
                 price       = f"{price_rounded:.8f}",
             )
             logger.info(
-                f"✅ Ordem {side} enviada | {symbol} | "
+                f"✅ Ordem {side_upper} enviada | {symbol} | "
                 f"Qty: {qty_rounded} | Price: {price_rounded:.4f} | "
                 f"Notional: ${notional:.2f}"
             )
             return order
         except BinanceAPIException as e:
-            logger.error(f"Erro ao enviar ordem {side} {symbol}: {e}")
+            logger.error(f"Erro ao enviar ordem {side_upper} {symbol}: {e}")
             return None
 
     def cancel_order(self, symbol: str, order_id: int) -> bool:
