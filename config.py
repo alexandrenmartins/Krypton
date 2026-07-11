@@ -58,3 +58,42 @@ USE_TESTNET = True   # True = Binance Testnet | False = Produção real
 
 # ─── Logging ──────────────────────────────────────────────────────────────────
 LOG_FILE = "tradebot.log"
+
+# ─── Configuração de Otimização (Walk-Forward) ────────────────────────────────
+# Usado por walk_forward.py. Não altera a estratégia live até copiar params
+# manualmente para as constantes SUPERTREND_*/RSI_*/MACD_* acima.
+OPTIMIZATION = {
+    "train_ratio": 0.7,
+    "validation_ratio": 0.3,
+    "optimization_metric": "sharpe_ratio",
+    # Critérios de aceitação na validação (OTIMIZACAO_WalkForward.md)
+    "acceptance": {
+        "min_sharpe": 0.3,
+        "max_drawdown_abs": 0.15,   # |DD| < 15%
+        "min_win_rate": 0.45,
+        "min_profit_factor": 1.2,
+        "min_return": 0.0,
+    },
+    # Grid reduzido (default) — rápido o bastante para smoke tests
+    "param_grid_reduced": {
+        "st_period":  [7, 10, 14],
+        "st_mult":    [2.5, 3.0, 3.5],
+        "rsi_period": [14],
+        "rsi_low":    [35, 40, 45],
+        "rsi_high":   [65, 70, 75],
+        "macd_fast":  [12],
+        "macd_slow":  [26],
+        "macd_sig":   [9],
+    },
+    # Grid completo do documento de otimização (~20k combinações)
+    "param_grid_full": {
+        "st_period":  [5, 7, 10, 14],
+        "st_mult":    [2.0, 2.5, 3.0, 3.5],
+        "rsi_period": [10, 14, 20],
+        "rsi_low":    [30, 35, 40, 45],
+        "rsi_high":   [65, 70, 75, 80],
+        "macd_fast":  [8, 10, 12],
+        "macd_slow":  [20, 26, 30],
+        "macd_sig":   [7, 9, 12],
+    },
+}
