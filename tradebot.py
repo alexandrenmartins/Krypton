@@ -23,6 +23,7 @@ from config import (
     MACD_SIGNAL,
     MACD_SLOW,
     MAX_SIMULTANEOUS_POS,
+    PAIR_PARAMS,
     RSI_HIGH,
     RSI_LOW,
     RSI_PERIOD,
@@ -240,16 +241,27 @@ class TradeBot:
             try:
                 df = self.binance.get_ohlcv(symbol, interval=TIMEFRAME, limit=300)
 
+                # Parâmetros por par (Walk-Forward) ou defaults globais
+                pp = PAIR_PARAMS.get(symbol, {})
+                st_period  = pp.get("st_period",  SUPERTREND_PERIOD)
+                st_mult    = pp.get("st_mult",    SUPERTREND_MULTIPLIER)
+                rsi_period = pp.get("rsi_period", RSI_PERIOD)
+                rsi_low    = pp.get("rsi_low",    RSI_LOW)
+                rsi_high   = pp.get("rsi_high",   RSI_HIGH)
+                macd_fast  = pp.get("macd_fast",  MACD_FAST)
+                macd_slow  = pp.get("macd_slow",  MACD_SLOW)
+                macd_sig   = pp.get("macd_sig",   MACD_SIGNAL)
+
                 signals = compute_signals(
                     df,
-                    st_period  = SUPERTREND_PERIOD,
-                    st_mult    = SUPERTREND_MULTIPLIER,
-                    rsi_period = RSI_PERIOD,
-                    rsi_low    = RSI_LOW,
-                    rsi_high   = RSI_HIGH,
-                    macd_fast  = MACD_FAST,
-                    macd_slow  = MACD_SLOW,
-                    macd_sig   = MACD_SIGNAL,
+                    st_period  = st_period,
+                    st_mult    = st_mult,
+                    rsi_period = rsi_period,
+                    rsi_low    = rsi_low,
+                    rsi_high   = rsi_high,
+                    macd_fast  = macd_fast,
+                    macd_slow  = macd_slow,
+                    macd_sig   = macd_sig,
                 )
 
                 current_signal = int(signals.iloc[-1])
@@ -294,7 +306,9 @@ class TradeBot:
           - Verifica SL/TP a cada 5 minutos
         """
         logger.info("🚀 Krypton TradeBot iniciado!")
-        logger.info(f"   Estratégia: Supertrend({SUPERTREND_PERIOD},{SUPERTREND_MULTIPLIER}) + RSI({RSI_PERIOD}) + MACD({MACD_FAST},{MACD_SLOW},{MACD_SIGNAL})")
+        logger.info(f"   Estratégia base: Supertrend({SUPERTREND_PERIOD},{SUPERTREND_MULTIPLIER}) + RSI({RSI_PERIOD}) + MACD({MACD_FAST},{MACD_SLOW},{MACD_SIGNAL})")
+        if PAIR_PARAMS:
+            logger.info(f"   Parâmetros por par (Walk-Forward): {list(PAIR_PARAMS.keys())}")
         logger.info(f"   Pares: {list(TRADING_PAIRS.keys())}")
         logger.info(f"   Modo: {'TESTNET ⚠️  — NÃO opera com dinheiro real' if USE_TESTNET else 'PRODUÇÃO 🔴 — capital real em risco'}")
 

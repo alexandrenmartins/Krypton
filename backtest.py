@@ -30,6 +30,7 @@ from config import (
     MACD_SIGNAL,
     MACD_SLOW,
     MAX_DRAWDOWN_PCT,
+    PAIR_PARAMS,
     RISK_PER_TRADE,
     RSI_HIGH,
     RSI_LOW,
@@ -427,12 +428,17 @@ def run_backtest(
 
     ✅ Pré-aquecimento: busca WARMUP_DAYS candles extras antes de `start`
        para garantir que RSI, MACD e Supertrend estejam estabilizados.
+    ✅ Params: usa PAIR_PARAMS do config se nenhum params explícito for passado.
     """
+    resolved = _resolve_params(symbol, params)
+
     if not quiet:
         print(f"\n{'='*60}")
         print(f"KRYPTON BACKTEST: {symbol}")
         print(f"Período: {start} → {end or 'hoje'}")
         print(f"{'='*60}")
+        if symbol in PAIR_PARAMS and params is None:
+            print(f"Usando parâmetros otimizados (Walk-Forward) para {symbol}")
 
     start_dt = datetime.strptime(start, "%Y-%m-%d")
     warmup_str = (start_dt - timedelta(days=WARMUP_DAYS)).strftime("%Y-%m-%d")
@@ -482,11 +488,31 @@ def run_backtest(
         df_full,
         metric_start=start,
         metric_end=end,
-        params=params,
+        params=resolved,
         quiet=quiet,
         symbol=symbol,
         data_source=data_source,
     )
+
+
+def _resolve_params(symbol: str, params: dict | None = None) -> dict:
+    """
+    Resolve parâmetros: usa params explícitos ou PAIR_PARAMS do config,
+    com fallback para os defaults globais.
+    """
+    if params is not None:
+        return params
+    pp = PAIR_PARAMS.get(symbol, {})
+    return {
+        "st_period":  pp.get("st_period",  SUPERTREND_PERIOD),
+        "st_mult":    pp.get("st_mult",    SUPERTREND_MULTIPLIER),
+        "rsi_period": pp.get("rsi_period", RSI_PERIOD),
+        "rsi_low":    pp.get("rsi_low",    RSI_LOW),
+        "rsi_high":   pp.get("rsi_high",   RSI_HIGH),
+        "macd_fast":  pp.get("macd_fast",  MACD_FAST),
+        "macd_slow":  pp.get("macd_slow",  MACD_SLOW),
+        "macd_sig":   pp.get("macd_sig",   MACD_SIGNAL),
+    }
 
 
 def run_backtest_with_params(

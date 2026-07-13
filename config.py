@@ -97,3 +97,34 @@ OPTIMIZATION = {
         "macd_sig":   [7, 9, 12],
     },
 }
+
+# ─── Parâmetros Otimizados por Par (Walk-Forward — 2022-2026) ──────────────────
+# Gerado por walk_forward.py com grid reduzido.
+# Apenas pares APROVADOS têm configuração própria; os demais usam os defaults.
+#
+# Para ativar, importe PAIR_PARAMS no tradebot.py e use:
+#   p = PAIR_PARAMS.get(symbol, {})
+#   st_period = p.get("st_period", SUPERTREND_PERIOD)
+#   ...
+PAIR_PARAMS = {
+    "BTCUSDT": {
+        "st_period":  10,     #↑ de 7 → mais suave, menos ruído
+        "st_mult":    2.5,    #↓ de 3.0 → bandas mais apertadas
+        "rsi_period": 14,
+        "rsi_low":    35,     #↓ de 40 → mais entradas
+        "rsi_high":   65,     #↓ de 70 → evita sobrecompra
+        "macd_fast":  12,
+        "macd_slow":  26,
+        "macd_sig":   9,
+    },
+    "ETHUSDT": {
+        "st_period":  7,
+        "st_mult":    2.5,    #↓ de 3.0 → bandas mais apertadas
+        "rsi_period": 14,
+        "rsi_low":    35,     #↓ de 40 → mais entradas
+        "rsi_high":   75,     #↑ de 70 → mais tolerante a sobrecompra
+        "macd_fast":  12,
+        "macd_slow":  26,
+        "macd_sig":   9,
+    },
+}
