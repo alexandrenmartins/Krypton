@@ -34,3 +34,7 @@ dist/
 *.swo
 .DS_Store
 Thumbs.db
+/.vs/Krypton.slnx/FileContentIndex
+*.wsuo
+/.vs/slnx.sqlite
+/.vs/slnx.sqlite-journal
