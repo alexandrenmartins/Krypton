@@ -50,11 +50,17 @@ logger = logging.getLogger("Krypton.Main")
 
 class TradeBot:
     """
-    Krypton TradeBot — Estratégia Supertrend + RSI + MACD Filter.
-
-    Executa uma vez por dia após o fechamento do candle diário (00:05 UTC).
-    Verifica SL/TP em tempo real a cada 5 minutos.
-
+    Para que serve: Gerenciar a execução automática da estratégia Supertrend+RSI+MACD.
+    
+    O que faz: Executa ciclos diários (às 00:05 UTC), calcula sinais técnicos, 
+               abre/fecha posições e verifica stop loss/take profit em tempo real.
+    
+    Como faz: Integra múltiplos módulos (BinanceInterface para API, RiskManager para risco,
+              compute_signals para indicadores técnicos) em um loop principal que:
+              - Agenda ciclos diários
+              - Monitora SL/TP a cada 5 minutos
+              - Gerencia portfolio de posições abertas
+    
     Performance (backtest Jan/2022 – Mai/2026):
       Retorno Total : +37,7% (SOLUSDT)
       Sharpe Ratio  : 0,932
@@ -64,6 +70,14 @@ class TradeBot:
     """
 
     def __init__(self):
+        """
+        Para que serve: Inicializar a instância do TradeBot com dependências.
+        O que faz: Cria conexão Binance, carrega dados dos pares, inicializa RiskManager.
+        Como faz: 
+            1. Instancia BinanceInterface para comunicação com a API
+            2. Inicializa dicionários vazios para posições e informações de símbolos
+            3. Chama _initialize() para carregar capital, info dos pares e criar RiskManager
+        """
         self.binance      = BinanceInterface()
         self.risk_manager : RiskManager | None = None
         self.positions    : dict = {}         # {symbol: {side, entry_price, quantity, sl, tp, order_id}}
@@ -73,7 +87,19 @@ class TradeBot:
     # ─── Inicialização ────────────────────────────────────────────────────────
 
     def _initialize(self) -> None:
-        """Inicializa capital, symbol_infos e RiskManager."""
+        """
+        Para que serve: Configurar o estado inicial do bot (capital, símbolos, limites de risco).
+        O que faz: Obtém capital USDT disponível, carrega informações de cada par e cria
+                   o RiskManager com o capital inicial.
+        Como faz:
+            1. Consulta saldo USDT atual da conta Binance
+            2. Para cada par em TRADING_PAIRS, busca informações (precision, lot size, etc)
+            3. Cria instância RiskManager com capital inicial
+            4. Log informativo sobre inicialização (modo testnet vs produção)
+        
+        Returns:
+            None (apenas configura o estado interno)
+        """
         usdt_balance = self.binance.get_account_balance("USDT")
         for sym in TRADING_PAIRS:
             self.symbol_infos[sym] = self.binance.get_symbol_info(sym)
@@ -88,7 +114,19 @@ class TradeBot:
 
     def _get_current_capital(self) -> float:
         """
-        Calcula capital total: USDT livre + valor mark-to-market das posições abertas.
+        Para que serve: Calcular o capital total (saldo USDT + valor das posições abertas).
+        O que faz: Soma o USDT livre com o valor mark-to-market de todas as posições
+                   abertas, fornecendo uma visão completa do patrimônio.
+        Como faz:
+            1. Obtém saldo USDT disponível na conta
+            2. Para cada posição aberta:
+               a. Busca preço atual do símbolo
+               b. Calcula P&L não realizado (diferença entre preço atual e entrada)
+               c. Adiciona ao capital o valor da posição ajustado pelo P&L
+            3. Retorna capital total
+        
+        Returns:
+            float: Capital total em USDT (saldo + posições)
         """
         usdt = self.binance.get_account_balance("USDT")
         for sym, pos in self.positions.items():
@@ -103,7 +141,25 @@ class TradeBot:
     # ─── Gerenciamento de Posições ────────────────────────────────────────────
 
     def _close_position(self, symbol: str, reason: str = "Signal") -> None:
-        """Fecha posição existente com ordem limit ao preço atual."""
+        """
+        Para que serve: Fechar uma posição aberta e registrar saída.
+        O que faz: Executa ordem limit ao preço atual para sair da posição,
+                   calcula P&L e remove a posição do dicionário interno.
+        Como faz:
+            1. Valida se posição existe
+            2. Busca preço atual e determina lado oposto (LONG→SELL, SHORT→BUY)
+            3. Coloca ordem limit com a quantidade exata da posição
+            4. Calcula P&L em % (diferença entre saída e entrada)
+            5. Log com detalhes (entry, exit, PnL, razão do fechamento)
+            6. Remove posição do dicionário
+        
+        Args:
+            symbol (str): Símbolo da moeda (ex: "SOLUSDT")
+            reason (str): Motivo do fechamento ("Signal", "StopLoss", "TakeProfit", etc)
+        
+        Returns:
+            None (modifica estado interno)
+        """
         if symbol not in self.positions:
             return
         pos        = self.positions[symbol]
@@ -137,9 +193,29 @@ class TradeBot:
         atr: float,
     ) -> None:
         """
-        Abre nova posição long (+1) ou short (-1) com sizing ATR-based.
-
-        direction : +1 = LONG | -1 = SHORT
+        Para que serve: Abrir uma nova posição long ou short com sizing baseado em risco.
+        O que faz: Calcula o tamanho da posição (ATR-based), define SL e TP, coloca ordem
+                   limit e registra a posição no dicionário interno.
+        Como faz:
+            1. Valida se não há posição já aberta nesse símbolo
+            2. Verifica via RiskManager se pode tradear (capital, drawdown, etc)
+            3. Calcula capital alocado para esse par (% do capital total)
+            4. Busca preço atual
+            5. Calcula tamanho da posição via RiskManager.calculate_position_size()
+               (usa ATR para SL, e capital × risco para determinar quantidade)
+            6. Define lado (BUY para long, SELL para short) e preço limit (0,05% favorável)
+            7. Coloca ordem limit na Binance
+            8. Se ordem bem-sucedida, armazena posição no dicionário com SL e TP
+            9. Log com detalhes (entry, SL, TP, risco em USD, razão risco:recompensa)
+        
+        Args:
+            symbol (str): Símbolo do par (ex: "SOLUSDT")
+            direction (int): +1 para LONG, -1 para SHORT
+            capital_allocation (float): Fração do capital para alocar (ex: 0.25 = 25%)
+            atr (float): Valor do ATR atual (usado para dimensionar SL/TP)
+        
+        Returns:
+            None (modifica estado interno)
         """
         if symbol in self.positions:
             return  # já tem posição neste par
@@ -188,7 +264,22 @@ class TradeBot:
     # ─── Verificação de SL/TP ─────────────────────────────────────────────────
 
     def _check_sl_tp(self) -> None:
-        """Verifica se alguma posição aberta atingiu o SL ou TP. Executa a cada 5 min."""
+        """
+        Para que serve: Monitorar posições abertas e fechar se atingirem SL ou TP.
+        O que faz: A cada execução, verifica preço atual de cada posição e fecha
+                   se bateu o stop loss ou take profit.
+        Como faz:
+            1. Itera sobre todas as posições abertas
+            2. Para cada posição:
+               a. Busca preço atual
+               b. Verifica se atingiu SL (condição diferente para LONG vs SHORT)
+               c. Verifica se atingiu TP (condição diferente para LONG vs SHORT)
+               d. Se atingiu SL: fecha com razão "StopLoss 🔴"
+               e. Se atingiu TP: fecha com razão "TakeProfit ✅"
+        
+        Returns:
+            None (modifica posições se forem fechadas)
+        """
         for symbol in list(self.positions.keys()):
             pos   = self.positions[symbol]
             price = self.binance.get_current_price(symbol)
@@ -211,10 +302,27 @@ class TradeBot:
 
     def daily_cycle(self) -> None:
         """
-        Ciclo principal executado às 00:05 UTC:
-          1. Verifica SL/TP
-          2. Reset diário do circuit breaker
-          3. Avalia sinais e gerencia posições para cada par
+        Para que serve: Executar o ciclo principal de trading (análise + decisões).
+        O que faz: Verifica SL/TP, reseta circuit breaker, calcula sinais de todos os pares
+                   e abre/fecha posições baseado na estratégia.
+        Como faz:
+            1. Log de início do ciclo com timestamp
+            2. Obtém capital atual e exibe status via RiskManager
+            3. Chama _check_sl_tp() para fechar posições que atingiram SL/TP
+            4. Reseta contadores diários do RiskManager (max drawdown, stop loss count)
+            5. Verifica se RiskManager permite trading (baseado em controles de risco)
+            6. Para cada par em TRADING_PAIRS:
+               a. Baixa últimos 300 candles
+               b. Resolve parâmetros (PAIR_PARAMS customizados ou defaults globais)
+               c. Calcula sinais (Supertrend+RSI+MACD)
+               d. Obtém ATR para dimensionamento
+               e. Verifica se sinal mudou em posição existente → fecha se necessário
+               f. Se novo sinal e sem posição aberta → abre nova posição
+               g. Respeita limite de posições simultâneas (MAX_SIMULTANEOUS_POS)
+            7. Exibe resumo de posições abertas ao fim do ciclo
+        
+        Returns:
+            None (modifica estado: abre/fecha posições, reseta contadores)
         """
         logger.info("=" * 70)
         logger.info(
@@ -300,10 +408,21 @@ class TradeBot:
 
     def run(self) -> None:
         """
-        Inicia o bot:
-          - Executa um ciclo imediato ao iniciar
-          - Agenda ciclos diários às 00:05 UTC
-          - Verifica SL/TP a cada 5 minutos
+        Para que serve: Iniciar o bot e manter o loop principal de execução.
+        O que faz: Executa ciclo imediato ao iniciar, agenda ciclos diários,
+                   verifica SL/TP periodicamente e mantém bot rodando indefinidamente.
+        Como faz:
+            1. Exibe logs informativos (estratégia, pares, modo de operação)
+            2. Executa daily_cycle() uma vez imediatamente
+            3. Agenda execução automática do daily_cycle() às 00:05 UTC (via schedule)
+            4. Entra em loop infinito:
+               a. Verifica se há alguma tarefa agendada para executar (schedule.run_pending())
+               b. Verifica SL/TP de posições abertas (_check_sl_tp())
+               c. Dorme 5 minutos (300 segundos) antes da próxima iteração
+            5. Entre ciclos diários, SL/TP são monitorados contínuamente (a cada 5 min)
+        
+        Returns:
+            None (função bloqueante, executa indefinidamente)
         """
         logger.info("🚀 Krypton TradeBot iniciado!")
         logger.info(f"   Estratégia base: Supertrend({SUPERTREND_PERIOD},{SUPERTREND_MULTIPLIER}) + RSI({RSI_PERIOD}) + MACD({MACD_FAST},{MACD_SLOW},{MACD_SIGNAL})")
@@ -329,5 +448,12 @@ class TradeBot:
 
 # ─── Entry Point ──────────────────────────────────────────────────────────────
 if __name__ == "__main__":
+    """
+    Para que serve: Definir o ponto de entrada do programa.
+    O que faz: Cria instância do TradeBot e inicia o loop principal.
+    Como faz:
+        1. Instancia a classe TradeBot (o __init__ já executa _initialize())
+        2. Chama bot.run() que inicia o loop infinito
+    """
     bot = TradeBot()
     bot.run()
