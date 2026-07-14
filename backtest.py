@@ -70,10 +70,38 @@ WARMUP_DAYS = 300
 
 
 def _date_to_ms(value: str) -> int:
+    """
+    Para que serve: Converte uma data em formato string para timestamp em milissegundos.
+    O que faz: Transforma a string "YYYY-MM-DD" em milissegundos (formato exigido pela API Binance).
+    Como faz: Usa datetime.strptime() para parsear a data, converte para timestamp Unix,
+              e multiplica por 1000 para obter milissegundos.
+    
+    Args:
+        value (str): Data no formato "YYYY-MM-DD"
+    
+    Returns:
+        int: Timestamp em milissegundos
+    """
     return int(datetime.strptime(value, "%Y-%m-%d").timestamp() * 1000)
 
 
 def _klines_to_df(klines: list) -> pd.DataFrame:
+    """
+    Para que serve: Converter dados brutos de candles (klines) da API Binance em um DataFrame limpo.
+    O que faz: Transforma a resposta JSON da Binance em um DataFrame Pandas com colunas padronizadas.
+    Como faz: 
+        1. Valida se há dados na lista
+        2. Cria DataFrame com todas as colunas retornadas pela Binance
+        3. Converte open_time para datetime e o define como índice
+        4. Converte valores numéricos para float
+        5. Retorna apenas as colunas essenciais: open, high, low, close, volume
+    
+    Args:
+        klines (list): Lista de candles brutos da API Binance
+    
+    Returns:
+        pd.DataFrame: DataFrame com OHLCV limpo e indexado por data
+    """
     if not klines:
         return pd.DataFrame()
 
@@ -96,7 +124,25 @@ def _klines_to_df(klines: list) -> pd.DataFrame:
 def get_ohlcv_binance(symbol: str, start_str: str, end_str: str | None,
                        base_url: str, symbol_map: dict | None = None) -> pd.DataFrame:
     """
-    Baixa OHLCV pela API pública da Binance/Binance US em lotes de 1000 candles.
+    Para que serve: Baixar dados históricos de uma criptomoeda da API Binance em lotes.
+    O que faz: Realiza múltiplas requisições à API Binance para coletar 1000 candles por vez
+               até acumular todo o período solicitado.
+    Como faz:
+        1. Valida/mapeia o símbolo se necessário (ex: SOLUSDT → SOLUSD para Binance US)
+        2. Converte datas de entrada para timestamps em milissegundos
+        3. Loop: faz requisição de 1000 candles até atingir a data final ou sem mais dados
+        4. Adiciona pausa (rate limiting) entre requisições para não sobrecarregar a API
+        5. Converte todos os klines coletados em um DataFrame limpo
+    
+    Args:
+        symbol (str): Símbolo do ativo (ex: "SOLUSDT")
+        start_str (str): Data inicial "YYYY-MM-DD"
+        end_str (str | None): Data final "YYYY-MM-DD" (None = até hoje)
+        base_url (str): URL base da API Binance
+        symbol_map (dict | None): Mapa para traduzir símbolos (ex: SOLUSDT → SOLUSD)
+    
+    Returns:
+        pd.DataFrame: DataFrame OHLCV com todos os candles coletados
     """
     symbol_api = (symbol_map.get(symbol.upper(), symbol.upper())
                   if symbol_map else symbol.upper())
@@ -145,7 +191,23 @@ def get_ohlcv_binance(symbol: str, start_str: str, end_str: str | None,
 def get_ohlcv_yahoo(symbol: str, start_str: str,
                      end_str: str | None = None) -> pd.DataFrame:
     """
-    Fallback via Yahoo Finance para períodos em que Binance não estiver disponível.
+    Para que serve: Baixar dados históricos via Yahoo Finance como alternativa/fallback.
+    O que faz: Utiliza a biblioteca yfinance para obter dados de criptomoedas quando Binance
+               não está disponível ou tem dados limitados.
+    Como faz:
+        1. Mapeia o símbolo para o formato Yahoo (ex: SOLUSDT → SOL-USD)
+        2. Faz download usando yfinance.download() com intervalo de 1 dia
+        3. Renomeia colunas para manter padrão (Open→open, Close→close, etc)
+        4. Valida se todos os dados essenciais estão presentes
+        5. Remove linhas com valores faltantes (NaN) e retorna DataFrame limpo
+    
+    Args:
+        symbol (str): Símbolo do ativo (ex: "SOLUSDT")
+        start_str (str): Data inicial "YYYY-MM-DD"
+        end_str (str | None): Data final "YYYY-MM-DD" (None = até hoje)
+    
+    Returns:
+        pd.DataFrame: DataFrame OHLCV ou DataFrame vazio se falhar
     """
     yf_symbol = YAHOO_SYMBOL_MAP.get(symbol.upper())
     if not yf_symbol:
@@ -186,7 +248,23 @@ def get_ohlcv_yahoo(symbol: str, start_str: str,
 def get_ohlcv(symbol: str, start_str: str,
                end_str: str | None = None) -> tuple[pd.DataFrame, str]:
     """
-    Busca dados em múltiplas fontes. Retorna a fonte com mais candles.
+    Para que serve: Obter dados OHLCV de múltiplas fontes automaticamente.
+    O que faz: Tenta baixar dados em ordem de preferência (Binance Global → Binance US → Yahoo)
+               e retorna a fonte que conseguiu mais candles.
+    Como faz:
+        1. Define lista de sources (funções que baixam dados de cada fonte)
+        2. Itera por cada fonte, tentando carregar dados
+        3. Se uma fonte retorna ≥50 candles, retorna imediatamente (ótima qualidade)
+        4. Caso contrário, guarda a com mais candles e continua tentando
+        5. Ao final, retorna o DataFrame com mais candles e a fonte usada
+    
+    Args:
+        symbol (str): Símbolo do ativo (ex: "SOLUSDT")
+        start_str (str): Data inicial "YYYY-MM-DD"
+        end_str (str | None): Data final "YYYY-MM-DD" (None = até hoje)
+    
+    Returns:
+        tuple[pd.DataFrame, str]: (DataFrame OHLCV, nome da fonte usada)
     """
     sources = [
         ("Binance Global", lambda: get_ohlcv_binance(
@@ -216,7 +294,17 @@ def get_ohlcv(symbol: str, start_str: str,
 
 
 def default_strategy_params() -> dict:
-    """Parâmetros de estratégia atuais em config.py (baseline)."""
+    """
+    Para que serve: Retornar os parâmetros padrão da estratégia (baseline).
+    O que faz: Coleta todos os parâmetros globais da estratégia Supertrend+RSI+MACD
+               do arquivo config.py e os retorna em um dicionário.
+    Como faz: Monta um dict com todos os parâmetros dos indicadores técnicos
+              lendo as constantes importadas de config.py.
+    
+    Returns:
+        dict: Dicionário com chaves: st_period, st_mult, rsi_period, rsi_low, rsi_high,
+              macd_fast, macd_slow, macd_sig
+    """
     return {
         "st_period":  SUPERTREND_PERIOD,
         "st_mult":    SUPERTREND_MULTIPLIER,
@@ -231,9 +319,24 @@ def default_strategy_params() -> dict:
 
 def simulate_strategy(df: pd.DataFrame, signals: pd.Series) -> dict:
     """
-    Simula a estratégia sobre uma janela já fatiada (sem warm-up).
-
-    Parâmetros de risco vêm de config.py (ATR mult, fees, capital, max DD).
+    Para que serve: Simular a execução da estratégia de trading em um período histórico.
+    O que faz: Itera candle a candle, entra em posições quando há sinal, gerencia stop loss/
+               take profit e calcula métricas de performance (retorno, Sharpe, drawdown, etc).
+    Como faz:
+        1. Para cada candle, verifica se há sinal (1=long, -1=short, 0=sem posição)
+        2. Se em posição: verifica se atingiu SL, TP ou sinal de saída
+        3. Se fechou posição: calcula P&L, deduz fees e atualiza capital
+        4. Se sem posição e novo sinal: calcula tamanho da posição baseado em risco (ATR)
+        5. Mantém histórico de equity para calcular Sharpe, drawdown, win rate, profit factor
+        6. Compara retorno com buy & hold do período
+    
+    Args:
+        df (pd.DataFrame): DataFrame OHLCV com dados do período
+        signals (pd.Series): Série com sinais da estratégia (-1, 0 ou 1)
+    
+    Returns:
+        dict: Métricas incluindo: n_trades, return_total, sharpe_ratio, max_drawdown,
+              win_rate, profit_factor, final_capital, bh_return, alpha_vs_bh, etc
     """
     if len(df) < 10:
         return {}
@@ -331,7 +434,24 @@ def simulate_strategy(df: pd.DataFrame, signals: pd.Series) -> dict:
 
 
 def _print_backtest_report(metrics: dict, symbol: str = "") -> None:
-    """Imprime tabela de métricas no estilo do backtest standalone."""
+    """
+    Para que serve: Exibir um relatório formatado das métricas do backtest.
+    O que faz: Imprime uma tabela comparativa entre o bot e buy & hold com todas
+               as métricas principais de performance.
+    Como faz:
+        1. Valida se há métricas para exibir
+        2. Cria tabela com delimitadores (─ e =)
+        3. Exibe cada métrica em colunas alinhadas: Bot vs Buy & Hold
+        4. Formata números (percentuais, decimais, inteiros) com cores apropriadas
+        5. Mostra razões de saída de trades (SL, TP, Sinal)
+    
+    Args:
+        metrics (dict): Dicionário com as métricas do backtest
+        symbol (str): Símbolo do ativo (opcional, para cabeçalho)
+    
+    Returns:
+        None (apenas imprime no console)
+    """
     if not metrics:
         return
     ret = metrics["return_total"]
@@ -365,9 +485,29 @@ def run_backtest_on_df(
     data_source: str = "",
 ) -> dict:
     """
-    Executa backtest sobre um DataFrame já carregado (inclui warm-up anterior).
-
-    Sinais são calculados em df_full; métricas só entre metric_start e metric_end.
+    Para que serve: Executar o backtest sobre um DataFrame já carregado com aquecimento.
+    O que faz: Calcula os sinais sobre todo o DataFrame, depois filtra apenas o período
+               solicitado para contabilizar as métricas (descarta o aquecimento).
+    Como faz:
+        1. Valida se há dados suficientes
+        2. Resolve parâmetros (usa passados ou defaults)
+        3. Calcula sinais de estratégia sobre TODO o DataFrame (incluindo aquecimento)
+        4. Filtra apenas candles entre metric_start e metric_end
+        5. Simula a estratégia sobre o período filtrado
+        6. Imprime relatório (se não estiver em modo quiet)
+        7. Retorna dicionário com métricas enriquecidas
+    
+    Args:
+        df_full (pd.DataFrame): DataFrame com histórico completo (incl. aquecimento)
+        metric_start (str): Data inicial do período de métrica "YYYY-MM-DD"
+        metric_end (str | None): Data final do período de métrica (None = até o fim)
+        params (dict | None): Parâmetros customizados da estratégia
+        quiet (bool): Se True, não imprime relatório
+        symbol (str): Símbolo do ativo (para relatório)
+        data_source (str): Fonte de dados usada (para relatório)
+    
+    Returns:
+        dict: Métricas do backtest com campos: symbol, data_source, params, etc
     """
     if df_full is None or len(df_full) < 50:
         return {}
@@ -424,11 +564,27 @@ def run_backtest(
     quiet: bool = False,
 ) -> dict:
     """
-    Executa backtest da estratégia Supertrend + RSI + MACD.
-
-    ✅ Pré-aquecimento: busca WARMUP_DAYS candles extras antes de `start`
-       para garantir que RSI, MACD e Supertrend estejam estabilizados.
-    ✅ Params: usa PAIR_PARAMS do config se nenhum params explícito for passado.
+    Para que serve: Executar um backtest completo da estratégia Supertrend+RSI+MACD.
+    O que faz: Orquestra todo o processo: busca dados com aquecimento, calcula sinais
+               sobre o período inteiro (com warm-up), filtra para o período solicitado
+               e retorna as métricas.
+    Como faz:
+        1. Resolve parâmetros (usa PAIR_PARAMS otimizados se disponíveis)
+        2. Calcula data de início do aquecimento (WARMUP_DAYS antes de start)
+        3. Baixa dados históricos de múltiplas fontes
+        4. Valida se há dados suficientes
+        5. Executa backtest sobre os dados com aquecimento
+        6. Exibe informações de progresso (se não quiet)
+    
+    Args:
+        symbol (str): Símbolo do ativo (ex: "SOLUSDT")
+        start (str): Data inicial "YYYY-MM-DD"
+        end (str | None): Data final "YYYY-MM-DD" (None = até hoje)
+        params (dict | None): Parâmetros customizados (None = usa PAIR_PARAMS ou defaults)
+        quiet (bool): Se True, suprime prints
+    
+    Returns:
+        dict: Métricas completas do backtest ou {} se falhar
     """
     resolved = _resolve_params(symbol, params)
 
@@ -497,8 +653,20 @@ def run_backtest(
 
 def _resolve_params(symbol: str, params: dict | None = None) -> dict:
     """
-    Resolve parâmetros: usa params explícitos ou PAIR_PARAMS do config,
-    com fallback para os defaults globais.
+    Para que serve: Resolver qual conjunto de parâmetros usar para o backtest.
+    O que faz: Prioriza parâmetros passados explicitamente, depois tenta PAIR_PARAMS
+               otimizados do config, e finalmente usa os defaults globais.
+    Como faz:
+        1. Se params foi passado, retorna imediatamente (maior prioridade)
+        2. Busca parâmetros específicos do ativo em PAIR_PARAMS
+        3. Para cada parâmetro, tenta obter do PAIR_PARAMS, senão usa default
+    
+    Args:
+        symbol (str): Símbolo do ativo
+        params (dict | None): Parâmetros explícitos (maior prioridade)
+    
+    Returns:
+        dict: Dicionário final com todos os parâmetros necessários
     """
     if params is not None:
         return params
@@ -523,12 +691,27 @@ def run_backtest_with_params(
     quiet: bool = False,
 ) -> dict:
     """
-    Executa backtest com parâmetros customizados da estratégia.
-
-    params = {
-        'st_period', 'st_mult', 'rsi_period', 'rsi_low', 'rsi_high',
-        'macd_fast', 'macd_slow', 'macd_sig'
-    }
+    Para que serve: Executar backtest com parâmetros de estratégia customizados.
+    O que faz: Wrapper que chama run_backtest passando parâmetros explícitos.
+    Como faz: Simplesmente delega para run_backtest com os parâmetros fornecidos.
+    
+    Args:
+        symbol (str): Símbolo do ativo
+        start (str): Data inicial "YYYY-MM-DD"
+        end (str | None): Data final "YYYY-MM-DD"
+        params (dict): Parâmetros da estratégia:
+                       - st_period: Período do Supertrend
+                       - st_mult: Multiplicador do Supertrend
+                       - rsi_period: Período do RSI
+                       - rsi_low: Limite inferior do RSI
+                       - rsi_high: Limite superior do RSI
+                       - macd_fast: Período fast do MACD
+                       - macd_slow: Período slow do MACD
+                       - macd_sig: Período da signal do MACD
+        quiet (bool): Se True, suprime output
+    
+    Returns:
+        dict: Métricas do backtest
     """
     return run_backtest(symbol, start, end, params=params, quiet=quiet)
 
