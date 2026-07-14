@@ -24,17 +24,21 @@ TRADING_PAIRS = {
 }
 
 # ─── Parâmetros da Estratégia (Otimizados via Grid Search — 1.612 dias) ───────
-# Supertrend
-SUPERTREND_PERIOD     = 7    # Períodos do ATR | Sensibilidade média-alta
+# Supertrend - Mede tendência usando volatilidade (ATR)
+# ATR (Average True Range) - Intervalo Verdadeiro Médio, indicador que mede a volatilidade do ativo
+SUPERTREND_PERIOD     = 7    # Períodos do ATR | Usa últimos 7 candles | Sensibilidade média-alta
 SUPERTREND_MULTIPLIER = 3.0  # Multiplicador ATR | Bandas amplas = menos whipsaws
 
-# RSI (Wilder)
+# RSI (Relative Strength Index) - Índice de Força Relativa, indicador que mede a força e a velocidade dos movimentos de preço
 RSI_PERIOD  = 14   # Padrão Wilder — mais estável que EMA simples
 RSI_LOW     = 40   # Threshold mínimo para entrada LONG (zona neutro-bullish)
 RSI_HIGH    = 70   # Threshold máximo para entrada LONG (evita sobrecompra)
 # Filtro assimétrico para SHORT: 30 ≤ RSI ≤ 60 (resultado da otimização)
 
-# MACD (padrão Binance/TradingView)
+# MACD (Moving Average Convergence Divergence) - Convergência e Divergência de Médias Móveis, indicador que identifica mudanças de 
+# momentum e reversões de tendência comparando duas médias móveis exponenciais de períodos diferentes
+# EMA = Exponential Moving Average (Média Móvel Exponencial)
+# (padrão Binance/TradingView)
 MACD_FAST   = 12   # EMA rápida
 MACD_SLOW   = 26   # EMA lenta
 MACD_SIGNAL = 9    # EMA da linha de sinal
