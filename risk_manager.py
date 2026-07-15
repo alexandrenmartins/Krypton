@@ -68,7 +68,7 @@ class RiskManager:
         if daily_loss >= CIRCUIT_BREAKER_PCT and not self.circuit_breaker:
             self.circuit_breaker = True
             logger.warning(
-                f"⚠️  CIRCUIT BREAKER ativado! "
+                f"CIRCUIT BREAKER ativado! "
                 f"Perda diária: {daily_loss:.1%} | "
                 f"Limite: {CIRCUIT_BREAKER_PCT:.0%}"
             )
@@ -85,7 +85,7 @@ class RiskManager:
         if drawdown >= MAX_DRAWDOWN_PCT and not self.halted:
             self.halted = True
             logger.critical(
-                f"🛑  MAX DRAWDOWN atingido! "
+                f"MAX DRAWDOWN atingido! "
                 f"DD: {drawdown:.1%} | "
                 f"Capital: ${current_capital:,.2f} | "
                 f"Pico: ${self.peak_capital:,.2f} | "

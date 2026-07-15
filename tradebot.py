@@ -105,9 +105,9 @@ class TradeBot:
             self.symbol_infos[sym] = self.binance.get_symbol_info(sym)
         self.risk_manager = RiskManager(initial_capital=usdt_balance)
         logger.info(
-            f"🟢 Krypton TradeBot inicializado | "
+            f"Krypton TradeBot inicializado | "
             f"Capital: ${usdt_balance:,.2f} USDT | "
-            f"Modo: {'TESTNET ⚠️' if USE_TESTNET else 'PRODUÇÃO 🔴'}"
+            f"Modo: {'[TESTNET]' if USE_TESTNET else '[PRODUCAO]'}"
         )
 
     # ─── Cálculo de Capital ───────────────────────────────────────────────────
@@ -179,7 +179,7 @@ class TradeBot:
                 else (entry - price) / entry * 100
             )
             logger.info(
-                f"📤 Posição fechada | {symbol} | Razão: {reason} | "
+                f"[CLOSE] Posicao fechada | {symbol} | Razao: {reason} | "
                 f"Entry: {entry:.4f} | Exit: {price:.4f} | "
                 f"PnL: {pnl_pct:+.2f}%"
             )
@@ -256,7 +256,7 @@ class TradeBot:
                 "order_id"    : order["orderId"],
             }
             logger.info(
-                f"📥 Nova posição | {symbol} | {self.positions[symbol]['side']} | "
+                f"[OPEN] Nova posicao | {symbol} | {self.positions[symbol]['side']} | "
                 f"Entry: {price:.4f} | SL: {sl:.4f} | TP: {tp:.4f} | "
                 f"Risco: ${sizing['risk_amount_usd']:.2f} | R:R {sizing['rr_ratio']:.1f}"
             )
@@ -294,9 +294,9 @@ class TradeBot:
             )
 
             if hit_sl:
-                self._close_position(symbol, "StopLoss 🔴")
+                self._close_position(symbol, "StopLoss")
             elif hit_tp:
-                self._close_position(symbol, "TakeProfit ✅")
+                self._close_position(symbol, "TakeProfit")
 
     # ─── Ciclo Diário Principal ───────────────────────────────────────────────
 
@@ -326,12 +326,12 @@ class TradeBot:
         """
         logger.info("=" * 70)
         logger.info(
-            f"🔄 CICLO DIÁRIO | {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
+            f"CICLO DIARIO | {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
         )
 
         current_capital = self._get_current_capital()
-        logger.info(f"💰 Capital atual: ${current_capital:,.2f} USDT")
-        logger.info(f"📊 {self.risk_manager.status(current_capital)}")
+        logger.info(f"Capital atual: ${current_capital:,.2f} USDT")
+        logger.info(f"Risk status: {self.risk_manager.status(current_capital)}")
 
         # Passo 1: Verificar SL/TP antes de qualquer decisão
         self._check_sl_tp()
@@ -341,7 +341,7 @@ class TradeBot:
 
         # Passo 3: Verificar se pode operar
         if not self.risk_manager.can_trade(current_capital):
-            logger.warning("⛔ Trading pausado pelos controles de risco.")
+            logger.warning("Trading pausado pelos controles de risco.")
             return
 
         # Passo 4: Processar cada par de trading
@@ -400,7 +400,7 @@ class TradeBot:
                 logger.error(f"Erro no ciclo de {symbol}: {e}", exc_info=True)
 
         logger.info(
-            f"📂 Posições abertas: {len(self.positions)}/{MAX_SIMULTANEOUS_POS} | "
+            f"Posicoes abertas: {len(self.positions)}/{MAX_SIMULTANEOUS_POS} | "
             f"{list(self.positions.keys())}"
         )
 
@@ -424,12 +424,12 @@ class TradeBot:
         Returns:
             None (função bloqueante, executa indefinidamente)
         """
-        logger.info("🚀 Krypton TradeBot iniciado!")
+        logger.info("Krypton TradeBot iniciado!")
         logger.info(f"   Estratégia base: Supertrend({SUPERTREND_PERIOD},{SUPERTREND_MULTIPLIER}) + RSI({RSI_PERIOD}) + MACD({MACD_FAST},{MACD_SLOW},{MACD_SIGNAL})")
         if PAIR_PARAMS:
             logger.info(f"   Parâmetros por par (Walk-Forward): {list(PAIR_PARAMS.keys())}")
         logger.info(f"   Pares: {list(TRADING_PAIRS.keys())}")
-        logger.info(f"   Modo: {'TESTNET ⚠️  — NÃO opera com dinheiro real' if USE_TESTNET else 'PRODUÇÃO 🔴 — capital real em risco'}")
+        logger.info(f"   Modo: {'[TESTNET] - NAO opera com dinheiro real' if USE_TESTNET else '[PRODUCAO] - capital real em risco'}")
 
         # Ciclo imediato ao iniciar
         self.daily_cycle()
@@ -437,7 +437,7 @@ class TradeBot:
         # Agendamento diário às 00:05 UTC
         schedule.every().day.at("00:05").do(self.daily_cycle)
 
-        logger.info("⏰ Próximo ciclo agendado: 00:05 UTC")
+        logger.info("Proximo ciclo agendado: 00:05 UTC")
         logger.info("   Verificando SL/TP a cada 5 minutos...")
 
         while True:

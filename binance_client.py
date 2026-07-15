@@ -56,7 +56,7 @@ class BinanceInterface:
             testnet=USE_TESTNET,
         )
         self.client.ping()
-        mode = "TESTNET ⚠️" if USE_TESTNET else "PRODUÇÃO 🔴"
+        mode = "[TESTNET]" if USE_TESTNET else "[PRODUCAO]"
         logger.info(f"Binance API conectada | Modo: {mode}")
 
     # ─── Dados de Mercado ─────────────────────────────────────────────────────
