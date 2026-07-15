@@ -12,7 +12,7 @@
 
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 import schedule
 
@@ -326,7 +326,8 @@ class TradeBot:
         """
         logger.info("=" * 70)
         logger.info(
-            f"CICLO DIARIO | {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
+            #f"CICLO DIARIO | {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}" *** DEPRECATED ***
+            f"CICLO DIARIO | {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"
         )
 
         current_capital = self._get_current_capital()
