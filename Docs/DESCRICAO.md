@@ -104,7 +104,9 @@ Quanto maior a volatilidade, menor a quantidade — o risco em dólares fica pr�
    - para cada par: baixa ~300 candles → calcula sinal → fecha se reverteu → abre se houver sinal e não houver posição
 4. **A cada 5 minutos:** verifica SL/TP em tempo real.
 5. Loga em `tradebot.log` e no console.
+
 OBS1: o bot **não** faz market orders, nunca saca fundos, e só opera com ordens limit.
+
 OBS2: Stop Loss (SL): nível de preço pré‑definido para limitar prejuízo. Quando o preço atinge o SL, a posição é fechada para evitar perdas maiores.
       Take Profit (TP): nível de preço para realizar lucro. Quando o preço atinge o TP, a posição é fechada para garantir ganho.
 
